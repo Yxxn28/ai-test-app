@@ -3,36 +3,90 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Test App</title>
+  <title>AI App Launcher</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,-apple-system,sans-serif;background:#f5f5f7;color:#1d1d1f}.card{width:min(90%,420px);padding:28px;background:#fff;border-radius:20px;box-shadow:0 8px 30px rgba(0,0,0,.08)}input,button{width:100%;padding:12px 14px;border-radius:10px;font-size:16px}input{border:1px solid #c7c7cc}button{margin-top:14px;border:0;cursor:pointer}#status{min-height:1.5em;font-size:14px}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,-apple-system,sans-serif;background:#f5f5f7;color:#1d1d1f}.card{width:min(90%,420px);padding:28px;background:#fff;border-radius:20px;box-shadow:0 8px 30px rgba(0,0,0,.08)}input,button{width:100%;padding:12px 14px;border-radius:10px;font-size:16px}input{border:1px solid #c7c7cc}button{margin-top:14px;border:0;cursor:pointer}#status{min-height:1.5em;font-size:14px}.hidden{display:none}
   </style>
 </head>
 <body>
   <main class="card">
-    <h1>AI Test App</h1>
-    <form id="unlock">
+    <h1>AI App Launcher</h1>
+    <form id="unlock" class="hidden">
       <label for="key">アクセスキー</label>
-      <input id="key" type="password" required />
+      <input id="key" type="password" autocomplete="current-password" required />
       <button type="submit">開く</button>
     </form>
     <p id="status" aria-live="polite"></p>
   </main>
   <script>
+    const CONTROL_URL='https://yxxn28.github.io/ai-app-assets/apps.json';
+    const form=document.querySelector('#unlock');
+    const status=document.querySelector('#status');
+    const keyInput=document.querySelector('#key');
     const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-    document.querySelector('#unlock').addEventListener('submit',async e=>{
+
+    let appConfig=null;
+
+    async function loadAppConfig(){
+      const appId=new URLSearchParams(location.search).get('app');
+      if(!appId){
+        status.textContent='アプリが指定されていません。';
+        return;
+      }
+
+      status.textContent='起動情報を確認中…';
+      try{
+        const controlRes=await fetch(`${CONTROL_URL}?t=${Date.now()}`,{cache:'no-store'});
+        if(!controlRes.ok) throw new Error('control fetch failed');
+        const control=await controlRes.json();
+        const config=control?.apps?.[appId];
+
+        if(!config){
+          status.textContent='指定されたアプリは利用できません。';
+          return;
+        }
+        if(config.enabled!==true){
+          status.textContent='このアプリは現在利用停止中です。';
+          return;
+        }
+        if(typeof config.payload!=='string'||!config.payload){
+          status.textContent='アプリの起動情報が不正です。';
+          return;
+        }
+
+        appConfig={
+          id:appId,
+          payloadUrl:new URL(config.payload,CONTROL_URL).href
+        };
+        status.textContent='';
+        form.classList.remove('hidden');
+        keyInput.focus();
+      }catch(_){
+        status.textContent='起動情報を確認できないため、アプリを起動できません。';
+      }
+    }
+
+    form.addEventListener('submit',async e=>{
       e.preventDefault();
-      const status=document.querySelector('#status');
+      if(!appConfig) return;
       status.textContent='確認中…';
       try{
-        const p=await (await fetch('app.enc',{cache:'no-store'})).json();
-        const raw=new TextEncoder().encode(document.querySelector('#key').value);
+        const payloadRes=await fetch(`${appConfig.payloadUrl}?t=${Date.now()}`,{cache:'no-store'});
+        if(!payloadRes.ok) throw new Error('payload fetch failed');
+        const p=await payloadRes.json();
+        const raw=new TextEncoder().encode(keyInput.value);
         const km=await crypto.subtle.importKey('raw',raw,'PBKDF2',false,['deriveKey']);
         const k=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b64(p.salt),iterations:p.iterations,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);
         const clear=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(p.iv)},k,b64(p.ciphertext));
-        document.open();document.write(new TextDecoder().decode(clear));document.close();
-      }catch(_){status.textContent='アクセスキーが違うか、データを読み込めませんでした。'}
+        document.open();
+        document.write(new TextDecoder().decode(clear));
+        document.close();
+      }catch(_){
+        status.textContent='アクセスキーが違うか、アプリを読み込めませんでした。';
+      }
     });
+
+    loadAppConfig();
   </script>
 </body>
 </html>
