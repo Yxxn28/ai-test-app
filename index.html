@@ -29,61 +29,35 @@
 
     async function loadAppConfig(){
       const appId=new URLSearchParams(location.search).get('app');
-      if(!appId){
-        status.textContent='アプリが指定されていません。';
-        return;
-      }
-
+      if(!appId){status.textContent='アプリが指定されていません。';return;}
       status.textContent='起動情報を確認中…';
       try{
         const controlRes=await fetch(`${CONTROL_URL}?t=${Date.now()}`,{cache:'no-store'});
         if(!controlRes.ok) throw new Error('control fetch failed');
         const control=await controlRes.json();
         const config=control?.apps?.[appId];
-
-        if(!config){
-          status.textContent='指定されたアプリは利用できません。';
-          return;
-        }
-        if(config.enabled!==true){
-          status.textContent='このアプリは現在利用停止中です。';
-          return;
-        }
-        if(typeof config.payload!=='string'||!config.payload){
-          status.textContent='アプリの起動情報が不正です。';
-          return;
-        }
-
-        appConfig={
-          id:appId,
-          payloadUrl:new URL(config.payload,CONTROL_URL).href
-        };
-        status.textContent='';
-        form.classList.remove('hidden');
-        keyInput.focus();
-      }catch(_){
-        status.textContent='起動情報を確認できないため、アプリを起動できません。';
-      }
+        if(!config){status.textContent='指定されたアプリは利用できません。';return;}
+        if(config.enabled!==true){status.textContent='このアプリは現在利用停止中です。';return;}
+        if(typeof config.payload!=='string'||!config.payload){status.textContent='アプリの起動情報が不正です。';return;}
+        appConfig={id:appId,payloadUrl:new URL(config.payload,CONTROL_URL).href};
+        status.textContent='';form.classList.remove('hidden');keyInput.focus();
+      }catch(_){status.textContent='起動情報を確認できないため、アプリを起動できません。';}
     }
 
     form.addEventListener('submit',async e=>{
-      e.preventDefault();
-      if(!appConfig) return;
-      status.textContent='確認中…';
+      e.preventDefault();if(!appConfig)return;status.textContent='確認中…';
       try{
+        const unlockValue=keyInput.value;
         const payloadRes=await fetch(`${appConfig.payloadUrl}?t=${Date.now()}`,{cache:'no-store'});
         if(!payloadRes.ok) throw new Error('payload fetch failed');
         const p=await payloadRes.json();
-        const raw=new TextEncoder().encode(keyInput.value);
+        const raw=new TextEncoder().encode(unlockValue);
         const km=await crypto.subtle.importKey('raw',raw,'PBKDF2',false,['deriveKey']);
         const k=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b64(p.salt),iterations:p.iterations,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);
         const clear=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(p.iv)},k,b64(p.ciphertext));
-        document.open();
-        document.write(new TextDecoder().decode(clear));
-        document.close();
-      }catch(_){
-        status.textContent='アクセスキーが違うか、アプリを読み込めませんでした。';
-      }
+        window.__APP_UNLOCK_KEY__=unlockValue;
+        document.open();document.write(new TextDecoder().decode(clear));document.close();
+      }catch(_){status.textContent='アクセスキーが違うか、アプリを読み込めませんでした。';}
     });
 
     loadAppConfig();
